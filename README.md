@@ -27,7 +27,7 @@ An Example run is shown below; the memory image for this is available at: http:/
 root@4A-JG-Kali:/mnt/ramdisk# time volatility --plugins=volatility-attributeht -f infected.elf.raw attributeht
 Volatility Foundation Volatility Framework 2.4
 Hacking Team Galileo RCS Implant Detection - 4ARMED Ltd
-PID        Detected Watermark   Process Name         Implant Type   Threat Actor    Confidence (1-4)
+PID        Detected Watermark   Process Name         Implant Type   Threat Actor    Confidence (Low-Certain)
 1852       3OqZ1N5a             userinit.exe         Elite/Soldier  FAE-FURLAN      Certain
 1888       3OqZ1N5a             explorer.exe         Elite/Soldier  FAE-FURLAN      Certain
 228        3OqZ1N5a             UsbCipHelper.ex      Elite/Soldier  FAE-FURLAN      Certain
