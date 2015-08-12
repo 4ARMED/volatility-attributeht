@@ -27,6 +27,7 @@ import volatility.plugins.common as common
 import volatility.plugins.handles as handles
 
 import re
+import json
 
 watermark_table = {
      "LOuWAplu":'DEVEL',
@@ -203,57 +204,100 @@ watermark_table = {
      "BTCYJM1a":"PCIT",
   }
 
+CONFIDENCES = {
+    0:"None",
+    1:"Low",
+    2:"Medium",
+    3:"High",
+    4:"Certain"
+}
 class AttributeHT(common.AbstractWindowsCommand):
-    """Find Hacking Team implants and attribute them using a shared memory watermark"""
+    """Find Hacking Team implants and attempt to attribute them using a shared memory watermark."""
 
     def calculate(self):
         addr_space = utils.load_as(self._config)
+
         p = handles.Handles(self._config)
 
         infected_pids = []
-        processes = {}
+        process_names = {}
+        display_indicators = []
 
+        # Get a list of handles to mapped sections
         for handle in p.calculate():
             pid, handle, object_type, name = handle
             if object_type == "Section":
-                if re.match("^[a-zA-Z0-9]{7,8}$", name):
-                    #print "{*} - Possible Infection - %s in PID %i"%(name, pid)
-                    pidinfo = {"pid":str(pid),"watermark":name, "process_name":"", "threat_actor":""}
-                    if name in watermark_table:
-                        #print "{*} - Confirmed Hacking Team Infection - %s"%watermark_table[name]
-                        pidinfo["threat_actor"] = watermark_table[name]
-                    if pidinfo not in infected_pids:
-                        infected_pids.append(pidinfo)
+                if re.match("^[a-zA-Z0-9]{7,8}$", name): # HT Implants map a 7/8 character shared memory section to use instead of a Mutex
+                    # Elite implants have two watermarks per PID, so neither PIDs nor watermarks are unique.
+                    infected_pids.append({"pid":str(pid), "watermark":name, "confidence":1}) 
 
         if infected_pids:
-            # Get a list of processes
+            # Get a list of processes, so we can tie a name to a PID
             p = taskmods.PSList(self._config)
             for process in p.calculate():
-                processes[str(process.UniqueProcessId)] = str(process.ImageFileName)
+                process_names[str(process.UniqueProcessId)] = str(process.ImageFileName)
 
+            with open('test.json', 'w') as f:
+                f.write(json.dumps(infected_pids, indent=4))
+
+            deletelist = []
             for i in infected_pids:
-                i["process_name"] = processes[i["pid"]]
-                if len(infected_pids) > 1:
-                    i["implant_type"] = "Elite/Soldier"
-                else:
-                    i["implant_type"] = "Scout"
+                ###  Do Confidence correlation. ###
+                # If we have both a 7 and an 8 character watermark, this makes it more certain it's a HT elite implant
+                pid = i["pid"]
+                watermark = i["watermark"]
+                # Search through all the other infected pid/name combinations for a 7 char version of our 8 char watermark
+                searchlist = infected_pids
+                if len(watermark) == 8:
+                    for j in infected_pids:
+                        compare_pid = j["pid"]
+                        compare_watermark = j["watermark"]
+                        #print compare_pid, pid, len(compare_watermark)
+                        if len(compare_watermark) == 7 and compare_pid == pid:
+                            # We've found both a 7 char and 8 char version - we're more confident that this is HT
+                            i["confidence"] = i["confidence"] + 1
+                            # Remove the shorter version from the list (attributable watermarks are 8 chars)
+                            deletelist.append(j)
 
+                if i not in deletelist:
+                    # Now see if the watermark can be attributed
+                    if watermark in watermark_table:
+                        i["threat_actor"] = watermark_table[watermark]
+                        i["confidence"] = i["confidence"] + 1 # We've matched a Hacking Team client, we're pretty sure it's HT
 
+                    # Tie process name to PID
+                    if pid in process_names:
+                        i["process_name"] = process_names[pid]
+                    else:
+                        i["process_name"] = "Not Found"
+                    
+                    # If we've got more than one infected process, it's more likely that we've found a HT infection, and this is typical of an Elite level implant
+                    if len(infected_pids) > 1:
+                        i["confidence"] = i["confidence"] + 1
+                        i["implant_type"] = "Elite/Soldier"
+                    else:
+                        # Scouts only have one infected PID
+                        i["implant_type"] = "Scout"
 
-        for pid in infected_pids:
-            yield pid["pid"], pid["watermark"], pid["process_name"], pid["implant_type"], pid["threat_actor"]
+            # Now delete the PIDS in the delete list
+            for j in deletelist:
+                del infected_pids[infected_pids.index(j)]
+
+            for pid in infected_pids:
+                yield pid["pid"], pid["watermark"], pid["process_name"], pid["implant_type"], pid["threat_actor"], pid["confidence"]
 
     def render_text(self, outfd, data):
         outfd.write("Hacking Team Galileo RCS Implant Detection - 4ARMED Ltd\n")
-        outfd.write("{0:<10} {1:<20} {2:<20} {3:<14} {4}\n".format(
-                "PID", "Detected Watermark", "Process Name", "Implant Type", "Threat Actor"))
+        outfd.write("{0:<10} {1:<20} {2:<20} {3:<14} {4:<15} {5}\n".format(
+                "PID", "Detected Watermark", "Process Name", "Implant Type", "Threat Actor", "Confidence (Low-Certain)"))
 
-        for pid, watermark, name, implant_type, actor in data:
-            outfd.write("{0:<10} {1:<20} {2:<20} {3:<14} {4}\n".format(
+        for pid, watermark, name, implant_type, actor, confidence in data:
+            outfd.write("{0:<10} {1:<20} {2:<20} {3:<14} {4:<15} {5}\n".format(
                     pid,
                     watermark,
                     name,
                     implant_type,
                     actor,
+                    CONFIDENCES[confidence]
                     ))
             
