@@ -27,7 +27,6 @@ import volatility.plugins.common as common
 import volatility.plugins.handles as handles
 
 import re
-import json
 
 watermark_table = {
      "LOuWAplu":'DEVEL',
@@ -236,9 +235,6 @@ class AttributeHT(common.AbstractWindowsCommand):
             p = taskmods.PSList(self._config)
             for process in p.calculate():
                 process_names[str(process.UniqueProcessId)] = str(process.ImageFileName)
-
-            with open('test.json', 'w') as f:
-                f.write(json.dumps(infected_pids, indent=4))
 
             deletelist = []
             for i in infected_pids:
